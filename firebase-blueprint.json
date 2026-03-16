@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user profile in FocusBattle",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "User's chosen display name" },
+        "field": { "type": "string", "description": "Study field or major" },
+        "avatar": { "type": "string", "description": "URL or identifier for avatar" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "totalSessions": { "type": "number", "description": "Total completed sessions" },
+        "totalMinutes": { "type": "number", "description": "Total minutes studied" },
+        "points": { "type": "number", "description": "Total gamification points" },
+        "level": { "type": "number", "description": "Calculated level based on points" },
+        "energyScore": { "type": "number", "description": "Dynamic energy score (1-100)" }
+      },
+      "required": ["uid", "createdAt", "totalSessions", "totalMinutes", "points", "level", "energyScore"]
+    },
+    "QueueEntry": {
+      "title": "QueueEntry",
+      "description": "A user waiting for a battle match",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "sessionLength": { "type": "number" },
+        "energyLevel": { "type": "string", "enum": ["Low", "Medium", "High"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["waiting", "matched"] },
+        "matchId": { "type": "string", "description": "ID of the created session if matched" }
+      },
+      "required": ["userId", "sessionLength", "energyLevel", "timestamp", "status"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "A study session (solo or battle)",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["solo", "battle"] },
+        "participants": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": { "type": "string", "enum": ["active", "completed", "abandoned"] },
+        "startTime": { "type": "string", "format": "date-time" },
+        "targetDuration": { "type": "number", "description": "Target duration in minutes" },
+        "results": {
+          "type": "object",
+          "description": "Map of userId to their results",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "focusPercentage": { "type": "number" },
+              "pointsEarned": { "type": "number" },
+              "aiSummary": { "type": "string" },
+              "aiObservations": { "type": "array", "items": { "type": "string" } },
+              "aiTip": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["type", "participants", "status", "startTime", "targetDuration"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and stats"
+    },
+    "queue/{userId}": {
+      "schema": { "$ref": "#/entities/QueueEntry" },
+      "description": "Active matchmaking queue. Document ID is the userId to prevent duplicates."
+    },
+    "sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/Session" },
+      "description": "Active and completed study sessions"
+    }
+  }
+}

@@ -1,0 +1,112 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+    
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+    
+    function isValidNumber(val, minVal, maxVal) {
+      return val is number && val >= minVal && val <= maxVal;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'displayName', 'field', 'avatar', 'createdAt', 'totalSessions', 'totalMinutes', 'points', 'level', 'energyScore']) &&
+             data.uid == request.auth.uid &&
+             (data.displayName == null || isValidString(data.displayName, 0, 50)) &&
+             (data.field == null || isValidString(data.field, 0, 50)) &&
+             (data.avatar == null || isValidString(data.avatar, 0, 200)) &&
+             data.createdAt is timestamp &&
+             isValidNumber(data.totalSessions, 0, 100000) &&
+             isValidNumber(data.totalMinutes, 0, 10000000) &&
+             isValidNumber(data.points, 0, 10000000) &&
+             isValidNumber(data.level, 1, 1000) &&
+             isValidNumber(data.energyScore, 0, 100);
+    }
+    
+    function isValidQueueEntry(data) {
+      return hasOnlyAllowedFields(['userId', 'sessionLength', 'energyLevel', 'timestamp', 'status', 'matchId']) &&
+             data.userId == request.auth.uid &&
+             data.sessionLength in [25, 45, 60] &&
+             data.energyLevel in ['Low', 'Medium', 'High'] &&
+             data.timestamp is timestamp &&
+             data.status in ['waiting', 'matched'] &&
+             (!('matchId' in data) || isValidString(data.matchId, 0, 100));
+    }
+    
+    function isValidSession(data) {
+      return hasOnlyAllowedFields(['type', 'participants', 'status', 'startTime', 'endTime', 'targetDuration', 'results']) &&
+             data.type in ['solo', 'battle'] &&
+             data.participants is list && data.participants.size() > 0 && data.participants.size() <= 2 &&
+             data.status in ['active', 'completed', 'abandoned'] &&
+             data.startTime is timestamp &&
+             (!('endTime' in data) || data.endTime is timestamp) &&
+             data.targetDuration in [25, 45, 60] &&
+             (!('results' in data) || data.results is map);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Anyone authenticated can read basic profiles for leaderboards and battles
+      allow read: if isAuthenticated();
+      
+      // Users can create and update their own profiles
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+    }
+    
+    match /queue/{userId} {
+      // Anyone authenticated can read the queue to find matches
+      allow read: if isAuthenticated();
+      
+      // Users can only manage their own queue entry
+      allow create: if isOwner(userId) && isValidQueueEntry(request.resource.data);
+      allow update: if isAuthenticated() && isValidQueueEntry(request.resource.data) &&
+                    (isOwner(userId) || (request.resource.data.status == 'matched' && request.resource.data.matchId != null)); 
+                    // Allow another user to update status to 'matched' when they find a match
+      allow delete: if isOwner(userId);
+    }
+    
+    match /sessions/{sessionId} {
+      // Participants can read their sessions
+      allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
+      
+      // Any authenticated user can create a session (needed for matchmaking)
+      allow create: if isAuthenticated() && isValidSession(request.resource.data) &&
+                    request.auth.uid in request.resource.data.participants;
+                    
+      // Participants can update the session (e.g., to add results or mark completed)
+      allow update: if isAuthenticated() && request.auth.uid in resource.data.participants &&
+                    isValidSession(request.resource.data) &&
+                    request.resource.data.type == resource.data.type &&
+                    request.resource.data.participants == resource.data.participants &&
+                    request.resource.data.startTime == resource.data.startTime;
+    }
+  }
+}
